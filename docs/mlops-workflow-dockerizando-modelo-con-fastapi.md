@@ -323,10 +323,11 @@ HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-### **2. Construir Imagen**
+### **2. Construir Imagen con Versionado**
 
 ```bash
-# Construir la imagen Docker
+# Construir la imagen Docker con versión específica
+docker build -t house-price-model:v1.0.0 .
 docker build -t house-price-model:latest .
 
 # Verificar la imagen
@@ -336,8 +337,8 @@ docker images | grep house-price-model
 ### **3. Ejecutar Contenedor**
 
 ```bash
-# Ejecutar en modo detached
-docker run -d -p 8000:8000 --name house-price-api house-price-model:latest
+# Ejecutar en modo detached con versión específica
+docker run -d -p 8000:8000 --name house-price-api house-price-model:v1.0.0
 
 # Verificar que está corriendo
 docker ps
@@ -463,20 +464,96 @@ if __name__ == "__main__":
 
 ---
 
-### **Publicar en Docker Hub**
+---
+
+## 📦 Publicación en Docker Hub
+
+### **1. Preparación para Publicar**
 
 ```bash
-# Tag de la imagen
-docker tag house-price-model:latest tu-usuario/house-price-model:v1.0.0
+# 1. Verificar que la imagen funciona localmente
+docker run -d -p 8000:8000 --name test-api house-price-model:v1.0.0
+curl http://localhost:8000/health
+docker stop test-api && docker rm test-api
+```
 
+### **2. Login y Tag de Imagen**
+
+```bash
 # Login a Docker Hub
 docker login
+# Introduce tu username y password de Docker Hub
 
-# Push de la imagen
+# Tag de la imagen con tu usuario de Docker Hub
+docker tag house-price-model:v1.0.0 tu-usuario/house-price-model:v1.0.0
+docker tag house-price-model:latest tu-usuario/house-price-model:latest
+
+# Ejemplo real:
+# docker tag house-price-model:v1.0.0 pytuxi/house-price-model:v1.0.0
+# docker tag house-price-model:latest pytuxi/house-price-model:latest
+```
+
+### **3. Publicar en Docker Hub**
+
+```bash
+# Push de la versión específica (recomendado)
 docker push tu-usuario/house-price-model:v1.0.0
 
-# Pull desde cualquier servidor
+# Push de latest (opcional)
+docker push tu-usuario/house-price-model:latest
+
+# Verificar en Docker Hub
+echo "✅ Imagen disponible en: https://hub.docker.com/r/tu-usuario/house-price-model"
+```
+
+---
+
+## 📥 Descarga y Uso de la Imagen
+
+### **1. Descargar desde Docker Hub**
+
+```bash
+# Descargar versión específica (recomendado)
 docker pull tu-usuario/house-price-model:v1.0.0
+
+# O descargar latest (puede tener cambios no deseados)
+docker pull tu-usuario/house-price-model:latest
+```
+
+### **2. Ejecutar Imagen Descargada**
+
+```bash
+# Ejecutar la versión específica descargada
+docker run -d -p 8000:8000 --name house-price-api tu-usuario/house-price-model:v1.0.0
+
+# Para Apple Silicon (ARM64), especificar plataforma si es necesario
+docker run -d -p 8000:8000 --platform linux/arm64 --name house-price-api tu-usuario/house-price-model:v1.0.0
+
+# Verificar que está corriendo
+docker ps
+```
+
+### **3. Verificación Post-Descarga**
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Test de predicción
+curl -X POST "http://localhost:8000/predict" \
+-H "Content-Type: application/json" \
+-d '{
+  "sqft": 1527,
+  "bedrooms": 2,
+  "bathrooms": 1.5,
+  "location": "Suburb",
+  "year_built": 1956,
+  "condition": "Good",
+  "price_per_sqft": 320
+}'
+
+# Abrir documentación en navegador
+open http://localhost:8000/docs
 ```
 
 ---
@@ -487,9 +564,17 @@ docker pull tu-usuario/house-price-model:v1.0.0
 # Desarrollo Local
 python -m uvicorn src.api.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Docker Build & Run
-docker build -t house-price-model:latest .
-docker run -d -p 8000:8000 --name api house-price-model:latest
+# Docker Build & Run (Local)
+docker build -t house-price-model:v1.0.0 .
+docker run -d -p 8000:8000 --name api house-price-model:v1.0.0
+
+# Publicar en Docker Hub
+docker tag house-price-model:v1.0.0 tu-usuario/house-price-model:v1.0.0
+docker push tu-usuario/house-price-model:v1.0.0
+
+# Descargar y usar desde Docker Hub
+docker pull tu-usuario/house-price-model:v1.0.0
+docker run -d -p 8000:8000 --name api tu-usuario/house-price-model:v1.0.0
 
 # Testing
 curl http://localhost:8000/health
@@ -501,7 +586,57 @@ docker exec -it api /bin/bash
 
 # Cleanup
 docker stop api && docker rm api
-docker rmi house-price-model:latest
+docker rmi tu-usuario/house-price-model:v1.0.0
+```
+
+---
+
+## 🏷️ Gestión de Versiones
+
+### **Estrategia de Versionado**
+
+```bash
+# Versiones semánticas
+docker build -t house-price-model:v1.0.0 .  # Release inicial
+docker build -t house-price-model:v1.0.1 .  # Bug fix
+docker build -t house-price-model:v1.1.0 .  # Nueva funcionalidad
+docker build -t house-price-model:v2.0.0 .  # Cambio mayor
+
+# Tags por ambiente
+docker tag house-price-model:v1.0.0 tu-usuario/house-price-model:dev
+docker tag house-price-model:v1.0.0 tu-usuario/house-price-model:staging
+docker tag house-price-model:v1.0.0 tu-usuario/house-price-model:prod
+
+# Tag por fecha
+docker tag house-price-model:v1.0.0 tu-usuario/house-price-model:2025-07-24
+```
+
+### **Mejores Prácticas**
+
+1. **✅ Siempre usar versiones específicas** en producción
+2. **✅ Testear localmente** antes de publicar
+3. **✅ Usar tags semánticos** (v1.0.0, v1.1.0, etc.)
+4. **✅ Mantener latest** actualizado pero no usarlo en producción
+5. **✅ Documentar cambios** entre versiones
+
+### **Ejemplo Real de Uso**
+
+```bash
+# Construir nueva versión
+docker build -t house-price-model:v1.0.1 .
+
+# Test local
+docker run -d -p 8000:8000 --name test house-price-model:v1.0.1
+curl http://localhost:8000/health
+docker stop test && docker rm test
+
+# Publicar
+docker tag house-price-model:v1.0.1 pytuxi/house-price-model:v1.0.1
+docker push pytuxi/house-price-model:v1.0.1
+
+# Uso en otros servidores
+docker pull pytuxi/house-price-model:v1.0.1
+docker run -d -p 8000:8000 pytuxi/house-price-model:v1.0.1
 ```
 
 ---
