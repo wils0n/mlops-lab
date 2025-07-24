@@ -1,158 +1,245 @@
-# 🚀 Tutorial MLOps: De Notebooks a Producción
+# 🧹 Tutorial MLOps: Data Processing (Limpieza de Datos)
 
 ## 📋 Tabla de Responsabilidades
 
-| Entregable                     | Responsable         |
-| ------------------------------ | ------------------- |
-| 📓 Notebooks de entrenamiento  | Científico de datos |
-| 🔧 Scripts limpios y modulares | Ingeniero de MLOps  |
-| 🤖 Modelo + preprocesador      | Ingeniero de MLOps  |
-| 🌐 API REST (FastAPI)          | Ingeniero de MLOps  |
-| 📱 App prototipo (Streamlit)   | Ingeniero de MLOps  |
-| 🐳 Dockerfile + Compose        | Ingeniero de MLOps  |
+| Entregable                   | Responsable         |
+| ---------------------------- | ------------------- |
+| 📓 Notebooks de exploración  | Científico de datos |
+| 🧹 Scripts de limpieza       | Ingeniero de MLOps  |
+| 🔧 Scripts modulares         | Ingeniero de MLOps  |
+| 🌐 API REST (FastAPI)        | Ingeniero de MLOps  |
+| 📱 App prototipo (Streamlit) | Ingeniero de MLOps  |
+| 🐳 Dockerfile + Compose      | Ingeniero de MLOps  |
 
 ---
 
-## 🎯 Paso 1: Convertir Notebook a Script Modular
+## 🎯 Paso 1: Convertir Notebook de Limpieza a Script Modular
 
 ### 📚 **¿Qué recibe el MLOps Engineer?**
 
-El científico de datos entrega un notebook `02_feature_engineering.ipynb` con:
+El científico de datos entrega un notebook `00_data_engineering.ipynb` con código exploratorio de limpieza:
 
 ```python
 # 📓 Código del Data Scientist en Jupyter
 import pandas as pd
-import numpy as np
-from datetime import datetime
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-# Carga de datos
-df = pd.read_csv("../data/processed/cleaned_house_data.csv")
+# Carga de datos raw
+df = pd.read_csv("../data/raw/house_data.csv")
 
-# Feature Engineering exploratorio
-df['house_age'] = datetime.now().year - df['year_built']
-df['price_per_sqft'] = df['price'] / df['sqft']
-df['bed_bath_ratio'] = df['bedrooms'] / df['bathrooms']
+# Limpieza exploratoria
+df = df.dropna()
+df = df[df['price'] > 10000]  # filtros básicos
+df = df[df['sqft'] > 200]
 
-# Visualizaciones y análisis...
+# Estandarización de nombres de columnas
+df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
+
+# Análisis y visualizaciones...
 ```
 
 ### ⚡ **Transformación a Script de Producción**
 
-El MLOps Engineer convierte esto en `src/features/engineer.py`:
+El MLOps Engineer convierte esto en `src/data/run_processing.py`:
 
 ```python
 # 🔧 Script de Producción del MLOps Engineer
 import pandas as pd
 import numpy as np
-from datetime import datetime
 import logging
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import OneHotEncoder
-from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
-import joblib
+from pathlib import Path
+import os
 
 # Configuración de logging profesional
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
-logger = logging.getLogger('feature-engineering')
+logger = logging.getLogger('data-processing')
 
-def create_features(df):
-    """Función modular para crear características."""
-    logger.info("Creating new features")
-    df_featured = df.copy()
+def clean_column_names(df):
+    """Estandariza los nombres de las columnas."""
+    logger.info("Cleaning column names")
+    df_clean = df.copy()
 
-    # Feature 1: Edad de la casa
-    current_year = datetime.now().year
-    df_featured['house_age'] = current_year - df_featured['year_built']
-    logger.info("Created 'house_age' feature")
+    # Estandarizar nombres: minúsculas, sin espacios
+    df_clean.columns = df_clean.columns.str.strip().str.lower().str.replace(" ", "_")
 
-    # Feature 2: Precio por pie cuadrado
-    df_featured['price_per_sqft'] = df_featured['price'] / df_featured['sqft']
-    logger.info("Created 'price_per_sqft' feature")
+    logger.info(f"Standardized {len(df_clean.columns)} column names")
+    return df_clean
 
-    # Feature 3: Ratio de habitaciones/baños
-    df_featured['bed_bath_ratio'] = df_featured['bedrooms'] / df_featured['bathrooms']
-    df_featured['bed_bath_ratio'] = df_featured['bed_bath_ratio'].replace([np.inf, -np.inf], np.nan)
-    df_featured['bed_bath_ratio'] = df_featured['bed_bath_ratio'].fillna(0)
-    logger.info("Created 'bed_bath_ratio' feature")
+def remove_invalid_rows(df):
+    """Elimina filas con valores inválidos o faltantes."""
+    logger.info(f"Initial dataset shape: {df.shape}")
 
-    return df_featured
+    # Eliminar filas con valores nulos
+    initial_rows = len(df)
+    df_clean = df.dropna()
+    logger.info(f"Removed {initial_rows - len(df_clean)} rows with null values")
 
-def create_preprocessor():
-    """Pipeline de preprocesamiento para producción."""
-    logger.info("Creating preprocessor pipeline")
+    # Filtros de validación básica
+    df_clean = df_clean[df_clean['price'] > 10000]  # Precios realistas
+    df_clean = df_clean[df_clean['sqft'] > 200]     # Casas reales
+    df_clean = df_clean[df_clean['bedrooms'] > 0]   # Al menos 1 habitación
+    df_clean = df_clean[df_clean['bathrooms'] > 0]  # Al menos 1 baño
 
-    # Características categóricas y numéricas
-    categorical_features = ['location', 'condition']
-    numerical_features = ['sqft', 'bedrooms', 'bathrooms', 'house_age', 'price_per_sqft', 'bed_bath_ratio']
+    logger.info(f"Final dataset shape after cleaning: {df_clean.shape}")
+    return df_clean
 
-    # Pipeline para características numéricas
-    numerical_transformer = Pipeline(steps=[
-        ('imputer', SimpleImputer(strategy='mean'))
-    ])
+def validate_data_quality(df):
+    """Valida la calidad de los datos limpios."""
+    logger.info("Validating data quality")
 
-    # Pipeline para características categóricas
-    categorical_transformer = Pipeline(steps=[
-        ('onehot', OneHotEncoder(handle_unknown='ignore'))
-    ])
+    # Verificar que no hay valores nulos
+    null_counts = df.isnull().sum()
+    if null_counts.sum() > 0:
+        logger.warning(f"Found null values: {null_counts[null_counts > 0].to_dict()}")
+    else:
+        logger.info("✅ No null values found")
 
-    # Combinador de transformadores
-    preprocessor = ColumnTransformer(
-        transformers=[
-            ('num', numerical_transformer, numerical_features),
-            ('cat', categorical_transformer, categorical_features)
-        ]
-    )
+    # Verificar rangos de datos
+    if df['price'].min() < 10000:
+        logger.warning(f"Found unusually low prices: min = {df['price'].min()}")
 
-    return preprocessor
+    if df['sqft'].min() < 200:
+        logger.warning(f"Found unusually small houses: min sqft = {df['sqft'].min()}")
 
-def run_feature_engineering(input_file, output_file, preprocessor_file):
-    """Pipeline completo de feature engineering."""
-    # Cargar datos
-    logger.info(f"Loading data from {input_file}")
+    logger.info("✅ Data quality validation completed")
+    return True
+
+def run_data_processing(input_file, output_file):
+    """Pipeline completo de limpieza de datos."""
+    # Verificar que el archivo de entrada existe
+    if not os.path.exists(input_file):
+        raise FileNotFoundError(f"Input file not found: {input_file}")
+
+    # Crear directorio de salida si no existe
+    output_dir = os.path.dirname(output_file)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Cargar datos raw
+    logger.info(f"Loading raw data from {input_file}")
     df = pd.read_csv(input_file)
+    logger.info(f"Loaded dataset with shape: {df.shape}")
 
-    # Crear características
-    df_featured = create_features(df)
-    logger.info(f"Created featured dataset with shape: {df_featured.shape}")
+    # Pipeline de limpieza
+    df_clean = clean_column_names(df)
+    df_clean = remove_invalid_rows(df_clean)
+    validate_data_quality(df_clean)
 
-    # Crear y entrenar preprocessor
-    preprocessor = create_preprocessor()
-    X = df_featured.drop(columns=['price'], errors='ignore')
-    y = df_featured['price'] if 'price' in df_featured.columns else None
+    # Guardar datos limpios
+    df_clean.to_csv(output_file, index=False)
+    logger.info(f"✅ Saved cleaned data to {output_file}")
 
-    # Entrenar y transformar
-    X_transformed = preprocessor.fit_transform(X)
-    logger.info("Fitted the preprocessor and transformed the features")
+    # Reporte de limpieza
+    original_rows = len(df)
+    clean_rows = len(df_clean)
+    rows_removed = original_rows - clean_rows
+    removal_percentage = (rows_removed / original_rows) * 100
 
-    # Guardar preprocessor entrenado
-    joblib.dump(preprocessor, preprocessor_file)
-    logger.info(f"Saved preprocessor to {preprocessor_file}")
+    logger.info(f"""
+    📊 DATA CLEANING REPORT
+    ----------------------
+    Original rows: {original_rows}
+    Clean rows: {clean_rows}
+    Rows removed: {rows_removed} ({removal_percentage:.2f}%)
+    Columns: {len(df_clean.columns)}
+    """)
 
-    # Guardar datos transformados
-    df_transformed = pd.DataFrame(X_transformed)
-    if y is not None:
-        df_transformed['price'] = y.values
-    df_transformed.to_csv(output_file, index=False)
-    logger.info(f"Saved fully preprocessed data to {output_file}")
-
-    return df_transformed
+    return df_clean
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser(description='Feature engineering for housing data.')
-    parser.add_argument('--input', required=True, help='Path to cleaned CSV file')
-    parser.add_argument('--output', required=True, help='Path for output CSV file')
-    parser.add_argument('--preprocessor', required=True, help='Path for saving the preprocessor')
+    parser = argparse.ArgumentParser(description='Data cleaning for housing data.')
+    parser.add_argument('--input', required=True, help='Path to raw CSV file')
+    parser.add_argument('--output', required=True, help='Path for cleaned CSV file')
 
     args = parser.parse_args()
 
-    run_feature_engineering(args.input, args.output, args.preprocessor)
+    run_data_processing(args.input, args.output)
 ```
+
+## 🔑 **Diferencias Clave: Notebook vs Script de Limpieza**
+
+### 📓 **Código del Data Scientist (Notebook)**
+
+- ✅ Exploración interactiva
+- ✅ Visualizaciones para entender datos
+- ✅ Experimentación con filtros
+- ❌ Código no reutilizable
+- ❌ Rutas hardcodeadas
+- ❌ Sin validaciones robustas
+- ❌ Difícil de automatizar
+
+### 🔧 **Código del MLOps Engineer (Script)**
+
+- ✅ **Modular**: Funciones específicas para cada tarea
+- ✅ **Configurable**: Archivos de entrada y salida parametrizados
+- ✅ **Robusto**: Validaciones y manejo de errores
+- ✅ **Auditable**: Logging detallado de cada paso
+- ✅ **Reproducible**: Mismo resultado en cualquier ambiente
+- ✅ **Escalable**: Procesa cualquier volumen de datos
+
+## 🚀 **Ejecutar el Script de Limpieza**
+
+### 1. **Crear estructura de directorios:**
+
+```bash
+mkdir -p data/raw data/processed
+```
+
+### 2. **Ejecutar limpieza de datos:**
+
+```bash
+python src/data/run_processing.py \
+  --input data/raw/house_data.csv \
+  --output data/processed/cleaned_house_data.csv
+```
+
+### 3. **Output esperado:**
+
+```
+2025-07-24 10:30:15 - data-processing - INFO - Loading raw data from data/raw/house_data.csv
+2025-07-24 10:30:15 - data-processing - INFO - Loaded dataset with shape: (1200, 7)
+2025-07-24 10:30:15 - data-processing - INFO - Cleaning column names
+2025-07-24 10:30:15 - data-processing - INFO - Standardized 7 column names
+2025-07-24 10:30:15 - data-processing - INFO - Initial dataset shape: (1200, 7)
+2025-07-24 10:30:15 - data-processing - INFO - Removed 45 rows with null values
+2025-07-24 10:30:15 - data-processing - INFO - Final dataset shape after cleaning: (1000, 7)
+2025-07-24 10:30:15 - data-processing - INFO - Validating data quality
+2025-07-24 10:30:15 - data-processing - INFO - ✅ No null values found
+2025-07-24 10:30:15 - data-processing - INFO - ✅ Data quality validation completed
+2025-07-24 10:30:15 - data-processing - INFO - ✅ Saved cleaned data to data/processed/cleaned_house_data.csv
+
+    📊 DATA CLEANING REPORT
+    ----------------------
+    Original rows: 1200
+    Clean rows: 1000
+    Rows removed: 200 (16.67%)
+    Columns: 7
+```
+
+## 📦 **Archivos Generados**
+
+### **`cleaned_house_data.csv`**
+
+```csv
+# Datos limpios, listos para feature engineering
+price,sqft,bedrooms,bathrooms,location,year_built,condition
+250000,1500,3,2,Suburb,1990,Good
+180000,1200,2,1,City,1985,Fair
+450000,2200,4,3,Downtown,2005,Excellent
+```
+
+**Características de los datos limpios:**
+
+- ✅ Sin valores nulos
+- ✅ Nombres de columnas estandarizados
+- ✅ Valores dentro de rangos realistas
+- ✅ Filas malformadas eliminadas
+- ✅ Listo para el siguiente paso: Feature Engineering
 
 ## 🔑 **Diferencias Clave: Notebook vs Script de Producción**
 
@@ -174,95 +261,3 @@ if __name__ == "__main__":
 - ✅ **Reproducible**: Pipeline determinístico
 - ✅ **Escalable**: Fácil integración en CI/CD
 - ✅ **Reutilizable**: Mismo preprocessor en entrenamiento y producción
-
-## 🚀 **Ejecutar el Script de Producción**
-
-### 1. **Crear estructura de directorios:**
-
-```bash
-mkdir -p data/processed models/trained
-```
-
-### 2. **Ejecutar feature engineering:**
-
-```bash
-python src/features/engineer.py \
-  --input data/processed/cleaned_house_data.csv \
-  --output data/processed/featured_house_data.csv \
-  --preprocessor models/trained/preprocessor.pkl
-```
-
-### 3. **Output esperado:**
-
-```
-2025-01-23 10:30:15 - feature-engineering - INFO - Loading data from data/processed/cleaned_house_data.csv
-2025-01-23 10:30:15 - feature-engineering - INFO - Creating new features
-2025-01-23 10:30:15 - feature-engineering - INFO - Created 'house_age' feature
-2025-01-23 10:30:15 - feature-engineering - INFO - Created 'price_per_sqft' feature
-2025-01-23 10:30:15 - feature-engineering - INFO - Created 'bed_bath_ratio' feature
-2025-01-23 10:30:15 - feature-engineering - INFO - Created featured dataset with shape: (1000, 9)
-2025-01-23 10:30:15 - feature-engineering - INFO - Creating preprocessor pipeline
-2025-01-23 10:30:15 - feature-engineering - INFO - Fitted the preprocessor and transformed the features
-2025-01-23 10:30:15 - feature-engineering - INFO - Saved preprocessor to models/trained/preprocessor.pkl
-2025-01-23 10:30:15 - feature-engineering - INFO - Saved fully preprocessed data to data/processed/featured_house_data.csv
-```
-
-## 📦 **Archivos Generados**
-
-### 1. **`featured_house_data.csv`**
-
-```csv
-# Datos transformados listos para ML
-sqft,bedrooms,bathrooms,house_age,price_per_sqft,bed_bath_ratio,location_City,location_Suburb,condition_Fair,condition_Good,price
-1500.0,3.0,2.0,34.0,166.67,1.5,0.0,1.0,0.0,1.0,250000
-```
-
-### 2. **`preprocessor.pkl`**
-
-- Pipeline de sklearn serializado
-- Contiene todas las transformaciones aprendidas
-- Listo para usar en producción y APIs
-
-## 🎯 **¿Por qué es importante el preprocessor.pkl?**
-
-### **En Entrenamiento:**
-
-```python
-# El preprocessor aprende las transformaciones
-preprocessor.fit(X_train)  # Aprende medias, categorías, etc.
-X_train_transformed = preprocessor.transform(X_train)
-model.fit(X_train_transformed, y_train)
-```
-
-### **En Producción:**
-
-```python
-# El mismo preprocessor transforma datos nuevos
-import joblib
-preprocessor = joblib.load('models/trained/preprocessor.pkl')
-X_new_transformed = preprocessor.transform(X_new)  # Mismas transformaciones
-predictions = model.predict(X_new_transformed)
-```
-
-## ✅ **Beneficios de esta Transformación**
-
-1. **🔄 Reproducibilidad**: Mismo resultado siempre
-2. **⚡ Automatización**: Integrable en pipelines CI/CD
-3. **🛡️ Robustez**: Manejo de errores y logging
-4. **📈 Escalabilidad**: Procesa cualquier volumen de datos
-5. **🔧 Mantenibilidad**: Código limpio y modular
-6. **🎯 Consistencia**: Mismas transformaciones en entrenamiento y producción
-
----
-
-## 🔮 **Próximos Pasos**
-
-En los siguientes pasos del tutorial cubriremos:
-
-- **Paso 2**: Script de entrenamiento modular (`train_model.py`)
-- **Paso 3**: API REST con FastAPI
-- **Paso 4**: App de demostración con Streamlit
-- **Paso 5**: Containerización con Docker
-- **Paso 6**: Orquestación con Docker Compose
-
-**¡El MLOps Engineer transforma experimentos en sistemas de producción robustos!** 🚀

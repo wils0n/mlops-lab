@@ -55,6 +55,23 @@ jobs:
           --models-dir models \  
           --mlflow-tracking-uri http://localhost:5555
 
+      - name: Show MLflow experiment logs
+        run: |
+          echo "::group::📁 MLflow directory tree"
+          ls -R mlruns/ || echo "No mlruns directory found"
+          echo "::endgroup::"
+
+          echo "::group::📄 Experiment summary from mlflow.db"
+          if [ -f mlflow.db ]; then
+            sudo apt-get update && sudo apt-get install -y sqlite3
+            sqlite3 mlflow.db "SELECT experiment_id, name FROM experiments;"
+            sqlite3 mlflow.db "SELECT run_uuid, key, value FROM metrics LIMIT 10;"
+            sqlite3 mlflow.db "SELECT run_uuid, key, value FROM params LIMIT 10;"
+          else
+            echo "No mlflow.db file found."
+          fi
+          echo "::endgroup::"
+
       - name: Cleaning up MLflow
         run: |
           docker stop mlflow-server

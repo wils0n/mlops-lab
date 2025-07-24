@@ -1,0 +1,617 @@
+# 🧠 Tutorial MLOps: Feature Engineering de Producción
+
+## 📋 Tabla de Responsabilidades
+
+| Entregable                        | Responsable         | Status               |
+| --------------------------------- | ------------------- | -------------------- |
+| 📓 Exploración de características | Científico de datos | ✅ Completo          |
+| 🔧 Pipeline de transformación     | Ingeniero de MLOps  | 🎯 **Este tutorial** |
+| 🤖 Preprocessor serializado       | Ingeniero de MLOps  | 🎯 **Este tutorial** |
+| 📊 Features listas para ML        | Ingeniero de MLOps  | 🎯 **Este tutorial** |
+| 🔄 Script reutilizable            | Ingeniero de MLOps  | 🎯 **Este tutorial** |
+
+---
+
+## 🎯 Paso 2: De Exploración a Pipeline de Producción
+
+### 📚 **¿Qué recibe el MLOps Engineer?**
+
+El científico de datos entrega un notebook `02_feature_engineering.ipynb` con:
+
+```python
+# 📓 Código exploratorio del Data Scientist
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Carga y exploración
+df = pd.read_csv("../data/processed/cleaned_house_data.csv")
+print(f"Dataset shape: {df.shape}")
+df.head()
+
+# Feature Engineering exploratorio
+df['house_age'] = 2025 - df['year_built']
+df['price_per_sqft'] = df['price'] / df['sqft']
+df['bed_bath_ratio'] = df['bedrooms'] / df['bathrooms']
+
+# Análisis de correlaciones
+plt.figure(figsize=(12, 8))
+correlation_matrix = df[['price', 'sqft', 'house_age', 'price_per_sqft', 'bed_bath_ratio']].corr()
+sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm')
+plt.show()
+
+# Encoding categórico manual
+df_encoded = pd.get_dummies(df, columns=['location', 'condition'])
+
+# Normalización básica
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+numeric_cols = ['sqft', 'bedrooms', 'bathrooms', 'house_age', 'price_per_sqft', 'bed_bath_ratio']
+df_encoded[numeric_cols] = scaler.fit_transform(df_encoded[numeric_cols])
+```
+
+### ⚡ **Transformación a Pipeline de Producción**
+
+El MLOps Engineer convierte esto en `src/features/engineer.py`:
+
+```python
+# 🔧 Pipeline de Producción del MLOps Engineer
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import logging
+import joblib
+from pathlib import Path
+from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder, LabelEncoder
+from sklearn.pipeline import Pipeline
+from sklearn.impute import SimpleImputer
+from sklearn.base import BaseEstimator, TransformerMixin
+
+# Configuración de logging profesional
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger('feature-engineering')
+
+class HouseFeaturesEngineer(BaseEstimator, TransformerMixin):
+    """
+    Transformador personalizado para feature engineering de casas.
+    Crea características derivadas específicas del dominio inmobiliario.
+    """
+
+    def __init__(self, current_year=None):
+        self.current_year = current_year or datetime.now().year
+
+    def fit(self, X, y=None):
+        """Aprende parámetros necesarios del dataset de entrenamiento."""
+        logger.info("Fitting HouseFeaturesEngineer")
+
+        # Calcular estadísticas para features derivadas
+        if 'sqft' in X.columns and 'bedrooms' in X.columns:
+            self.median_sqft_per_bedroom = X['sqft'].median() / X['bedrooms'].median()
+        else:
+            self.median_sqft_per_bedroom = 500  # Default fallback
+
+        return self
+
+    def transform(self, X):
+        """Aplica las transformaciones de feature engineering."""
+        logger.info("Transforming features with HouseFeaturesEngineer")
+        X_transformed = X.copy()
+
+        # Feature 1: Edad de la casa
+        if 'year_built' in X_transformed.columns:
+            X_transformed['house_age'] = self.current_year - X_transformed['year_built']
+            logger.info("✅ Created 'house_age' feature")
+
+        # Feature 2: Ratio habitaciones/baños
+        if 'bedrooms' in X_transformed.columns and 'bathrooms' in X_transformed.columns:
+            # Manejar división por cero
+            X_transformed['bed_bath_ratio'] = X_transformed['bedrooms'] / X_transformed['bathrooms'].replace(0, np.nan)
+            X_transformed['bed_bath_ratio'] = X_transformed['bed_bath_ratio'].fillna(X_transformed['bedrooms'])
+            logger.info("✅ Created 'bed_bath_ratio' feature")
+
+        # Feature 3: Superficie por habitación
+        if 'sqft' in X_transformed.columns and 'bedrooms' in X_transformed.columns:
+            X_transformed['sqft_per_bedroom'] = X_transformed['sqft'] / X_transformed['bedrooms'].replace(0, 1)
+            logger.info("✅ Created 'sqft_per_bedroom' feature")
+
+        # Feature 4: Es casa nueva? (menos de 5 años)
+        if 'house_age' in X_transformed.columns:
+            X_transformed['is_new_house'] = (X_transformed['house_age'] <= 5).astype(int)
+            logger.info("✅ Created 'is_new_house' feature")
+
+        # Feature 5: Es casa grande? (más de 2000 sqft)
+        if 'sqft' in X_transformed.columns:
+            X_transformed['is_large_house'] = (X_transformed['sqft'] > 2000).astype(int)
+            logger.info("✅ Created 'is_large_house' feature")
+
+        # Feature 6: Categoría de ubicación simplificada
+        if 'location' in X_transformed.columns:
+            location_mapping = {
+                'Downtown': 'Urban',
+                'Urban': 'Urban',
+                'Suburb': 'Suburban',
+                'Rural': 'Rural',
+                'Waterfront': 'Premium',
+                'Mountain': 'Premium'
+            }
+            X_transformed['location_category'] = X_transformed['location'].map(location_mapping).fillna('Other')
+            logger.info("✅ Created 'location_category' feature")
+
+        # Remover columnas originales que ya no necesitamos
+        columns_to_drop = ['year_built']  # Mantenemos location original para OneHotEncoder
+        X_transformed = X_transformed.drop(columns=[col for col in columns_to_drop if col in X_transformed.columns])
+
+        logger.info(f"Feature engineering completed. New shape: {X_transformed.shape}")
+        return X_transformed
+
+def create_feature_engineering_pipeline():
+    """
+    Crea el pipeline completo de feature engineering para producción.
+
+    Returns:
+        sklearn.pipeline.Pipeline: Pipeline completo de transformación
+    """
+    logger.info("Creating feature engineering pipeline")
+
+    # Definir columnas por tipo
+    # Estas se actualizarán después del feature engineering
+    original_numeric = ['sqft', 'bedrooms', 'bathrooms', 'price_per_sqft']
+    derived_numeric = ['house_age', 'bed_bath_ratio', 'sqft_per_bedroom']
+    binary_features = ['is_new_house', 'is_large_house']
+    categorical_features = ['location', 'condition', 'location_category']
+
+    # Todas las características numéricas (originales + derivadas + binarias)
+    all_numeric = original_numeric + derived_numeric + binary_features
+
+    # Pipeline para características numéricas
+    numeric_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='median')),
+        ('scaler', StandardScaler())
+    ])
+
+    # Pipeline para características categóricas
+    categorical_transformer = Pipeline(steps=[
+        ('imputer', SimpleImputer(strategy='constant', fill_value='Unknown')),
+        ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False))
+    ])
+
+    # Combinador de transformadores
+    preprocessor = ColumnTransformer(
+        transformers=[
+            ('num', numeric_transformer, all_numeric),
+            ('cat', categorical_transformer, categorical_features)
+        ],
+        remainder='drop'  # Eliminar columnas no especificadas
+    )
+
+    # Pipeline completo: Feature Engineering + Preprocessing
+    pipeline = Pipeline(steps=[
+        ('feature_engineer', HouseFeaturesEngineer()),
+        ('preprocessor', preprocessor)
+    ])
+
+    logger.info("✅ Feature engineering pipeline created")
+    return pipeline
+
+def validate_features(df):
+    """Valida que el DataFrame tenga las columnas requeridas."""
+    required_columns = ['sqft', 'bedrooms', 'bathrooms', 'location', 'year_built', 'condition']
+
+    missing_columns = [col for col in required_columns if col not in df.columns]
+    if missing_columns:
+        raise ValueError(f"Missing required columns: {missing_columns}")
+
+    logger.info("✅ Feature validation passed")
+    return True
+
+def generate_feature_report(X_original, X_transformed, feature_names):
+    """Genera un reporte de las características creadas."""
+    report = {
+        'original_features': X_original.shape[1],
+        'transformed_features': X_transformed.shape[1],
+        'feature_names': feature_names,
+        'transformation_ratio': X_transformed.shape[1] / X_original.shape[1]
+    }
+
+    logger.info(f"📊 Feature Report:")
+    logger.info(f"   Original features: {report['original_features']}")
+    logger.info(f"   Transformed features: {report['transformed_features']}")
+    logger.info(f"   Transformation ratio: {report['transformation_ratio']:.2f}x")
+
+    return report
+
+def run_feature_engineering(input_file, output_file, preprocessor_file):
+    """
+    Pipeline completo de feature engineering para producción.
+
+    Args:
+        input_file (str): Ruta al archivo CSV de datos limpios
+        output_file (str): Ruta para guardar datos con features
+        preprocessor_file (str): Ruta para guardar el pipeline serializado
+    """
+    try:
+        # 1. Cargar datos limpios
+        logger.info(f"📁 Loading cleaned data from {input_file}")
+        df = pd.read_csv(input_file)
+        logger.info(f"✅ Loaded dataset with shape: {df.shape}")
+
+        # 2. Validar estructura de datos
+        validate_features(df)
+
+        # 3. Separar características y target
+        target_column = 'price'
+        if target_column in df.columns:
+            X = df.drop(columns=[target_column])
+            y = df[target_column]
+            logger.info(f"✅ Separated features (X) and target (y)")
+        else:
+            X = df
+            y = None
+            logger.warning(f"⚠️ Target column '{target_column}' not found. Proceeding with feature engineering only.")
+
+        # 4. Crear y entrenar pipeline
+        logger.info("🔧 Creating and fitting feature engineering pipeline")
+        pipeline = create_feature_engineering_pipeline()
+
+        # 5. Ajustar pipeline y transformar datos
+        X_transformed = pipeline.fit_transform(X)
+
+        # 6. Obtener nombres de características después de la transformación
+        # Esto es complejo debido a OneHotEncoder, pero podemos aproximarlo
+        try:
+            feature_names = pipeline.named_steps['preprocessor'].get_feature_names_out()
+        except:
+            feature_names = [f'feature_{i}' for i in range(X_transformed.shape[1])]
+
+        logger.info(f"✅ Feature engineering completed. Shape: {X_transformed.shape}")
+
+        # 7. Generar reporte de transformación
+        generate_feature_report(X, X_transformed, feature_names)
+
+        # 8. Guardar pipeline entrenado
+        logger.info(f"💾 Saving trained pipeline to {preprocessor_file}")
+
+        # Crear directorio si no existe
+        Path(preprocessor_file).parent.mkdir(parents=True, exist_ok=True)
+
+        joblib.dump(pipeline, preprocessor_file)
+        logger.info(f"✅ Pipeline saved successfully")
+
+        # 9. Preparar datos finales para guardar
+        df_output = pd.DataFrame(X_transformed, columns=feature_names)
+
+        # Agregar target si existe
+        if y is not None:
+            df_output[target_column] = y.values
+
+        # 10. Guardar datos transformados
+        logger.info(f"💾 Saving transformed data to {output_file}")
+
+        # Crear directorio si no existe
+        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+
+        df_output.to_csv(output_file, index=False)
+        logger.info(f"✅ Transformed data saved successfully")
+
+        # 11. Resumen final
+        logger.info("🎉 Feature engineering pipeline completed successfully!")
+        logger.info(f"📊 Summary:")
+        logger.info(f"   Input: {input_file} ({df.shape})")
+        logger.info(f"   Output: {output_file} ({df_output.shape})")
+        logger.info(f"   Pipeline: {preprocessor_file}")
+
+        return df_output
+
+    except Exception as e:
+        logger.error(f"❌ Error in feature engineering pipeline: {str(e)}")
+        raise
+
+def test_pipeline(preprocessor_file, sample_data=None):
+    """
+    Función para testear el pipeline guardado con datos de muestra.
+
+    Args:
+        preprocessor_file (str): Ruta al pipeline serializado
+        sample_data (dict, optional): Datos de muestra para testear
+    """
+    logger.info("🧪 Testing saved pipeline")
+
+    # Cargar pipeline
+    pipeline = joblib.load(preprocessor_file)
+    logger.info("✅ Pipeline loaded successfully")
+
+    # Datos de muestra si no se proporcionan
+    if sample_data is None:
+        sample_data = {
+            'sqft': [1500, 2000, 1200],
+            'bedrooms': [3, 4, 2],
+            'bathrooms': [2, 3, 1],
+            'location': ['Suburb', 'Urban', 'Rural'],
+            'year_built': [2000, 1985, 2010],
+            'condition': ['Good', 'Excellent', 'Fair'],
+            'price_per_sqft': [200, 250, 180]
+        }
+
+    # Crear DataFrame de prueba
+    test_df = pd.DataFrame(sample_data)
+    logger.info(f"✅ Created test data with shape: {test_df.shape}")
+
+    # Transformar datos de prueba
+    transformed = pipeline.transform(test_df)
+    logger.info(f"✅ Test transformation successful. Output shape: {transformed.shape}")
+
+    return transformed
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Feature engineering pipeline for house price prediction')
+    parser.add_argument('--input', required=True, help='Path to cleaned CSV file')
+    parser.add_argument('--output', required=True, help='Path for output CSV file with engineered features')
+    parser.add_argument('--preprocessor', required=True, help='Path for saving the trained preprocessing pipeline')
+    parser.add_argument('--test', action='store_true', help='Run pipeline test after training')
+
+    args = parser.parse_args()
+
+    # Ejecutar pipeline principal
+    run_feature_engineering(args.input, args.output, args.preprocessor)
+
+    # Ejecutar test si se solicita
+    if args.test:
+        logger.info("🧪 Running pipeline test")
+        test_pipeline(args.preprocessor)
+        logger.info("✅ Pipeline test completed successfully")
+```
+
+## 🔑 **Diferencias Clave: Exploración vs Pipeline de Producción**
+
+### 📓 **Código del Data Scientist (Notebook)**
+
+```python
+# ❌ Código exploratorio - No apto para producción
+df['house_age'] = 2025 - df['year_built']  # Año hardcodeado
+df['bed_bath_ratio'] = df['bedrooms'] / df['bathrooms']  # Sin manejo de división por 0
+df_encoded = pd.get_dummies(df, columns=['location'])  # Sin handle_unknown
+scaler.fit_transform(df[numeric_cols])  # Fit y transform juntos (data leakage)
+```
+
+### 🔧 **Código del MLOps Engineer (Pipeline)**
+
+```python
+# ✅ Código de producción - Robusto y escalable
+class HouseFeaturesEngineer(BaseEstimator, TransformerMixin):
+    def __init__(self, current_year=None):
+        self.current_year = current_year or datetime.now().year  # ✅ Configurable
+
+    def transform(self, X):
+        X_transformed['bed_bath_ratio'] = X['bedrooms'] / X['bathrooms'].replace(0, np.nan)  # ✅ Manejo de división por 0
+
+Pipeline([
+    ('feature_engineer', HouseFeaturesEngineer()),  # ✅ Separación clara
+    ('preprocessor', ColumnTransformer([
+        ('onehot', OneHotEncoder(handle_unknown='ignore'))  # ✅ Manejo de categorías nuevas
+    ]))
+])
+```
+
+## 🚀 **Ejecutar el Pipeline de Feature Engineering**
+
+### 1. **Crear estructura de directorios:**
+
+```bash
+mkdir -p data/processed models/trained logs
+```
+
+### 2. **Ejecutar pipeline completo:**
+
+```bash
+python src/features/engineer.py \
+  --input data/processed/cleaned_house_data.csv \
+  --output data/processed/featured_house_data.csv \
+  --preprocessor models/trained/preprocessor.pkl \
+  --test
+```
+
+### 3. **Output esperado:**
+
+```
+2025-07-24 10:30:15 - feature-engineering - INFO - 📁 Loading cleaned data from data/processed/cleaned_house_data.csv
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Loaded dataset with shape: (1000, 8)
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Feature validation passed
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Separated features (X) and target (y)
+2025-07-24 10:30:15 - feature-engineering - INFO - 🔧 Creating and fitting feature engineering pipeline
+2025-07-24 10:30:15 - feature-engineering - INFO - Creating feature engineering pipeline
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Feature engineering pipeline created
+2025-07-24 10:30:15 - feature-engineering - INFO - Fitting HouseFeaturesEngineer
+2025-07-24 10:30:15 - feature-engineering - INFO - Transforming features with HouseFeaturesEngineer
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Created 'house_age' feature
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Created 'bed_bath_ratio' feature
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Created 'sqft_per_bedroom' feature
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Created 'is_new_house' feature
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Created 'is_large_house' feature
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Created 'location_category' feature
+2025-07-24 10:30:15 - feature-engineering - INFO - Feature engineering completed. New shape: (1000, 13)
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Feature engineering completed. Shape: (1000, 25)
+2025-07-24 10:30:15 - feature-engineering - INFO - 📊 Feature Report:
+2025-07-24 10:30:15 - feature-engineering - INFO -    Original features: 7
+2025-07-24 10:30:15 - feature-engineering - INFO -    Transformed features: 25
+2025-07-24 10:30:15 - feature-engineering - INFO -    Transformation ratio: 3.57x
+2025-07-24 10:30:15 - feature-engineering - INFO - 💾 Saving trained pipeline to models/trained/preprocessor.pkl
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Pipeline saved successfully
+2025-07-24 10:30:15 - feature-engineering - INFO - 💾 Saving transformed data to data/processed/featured_house_data.csv
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Transformed data saved successfully
+2025-07-24 10:30:15 - feature-engineering - INFO - 🎉 Feature engineering pipeline completed successfully!
+2025-07-24 10:30:15 - feature-engineering - INFO - 🧪 Running pipeline test
+2025-07-24 10:30:15 - feature-engineering - INFO - 🧪 Testing saved pipeline
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Pipeline loaded successfully
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Created test data with shape: (3, 7)
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Test transformation successful. Output shape: (3, 25)
+2025-07-24 10:30:15 - feature-engineering - INFO - ✅ Pipeline test completed successfully
+```
+
+## 📦 **Archivos Generados**
+
+### 1. **`featured_house_data.csv`**
+
+```csv
+# Datos transformados con todas las características engineered
+num__sqft,num__bedrooms,num__bathrooms,num__price_per_sqft,num__house_age,num__bed_bath_ratio,num__sqft_per_bedroom,num__is_new_house,num__is_large_house,cat__location_Downtown,cat__location_Mountain,cat__location_Rural,cat__location_Suburb,cat__location_Urban,cat__location_Waterfront,cat__condition_Excellent,cat__condition_Fair,cat__condition_Good,cat__condition_Poor,cat__location_category_Premium,cat__location_category_Rural,cat__location_category_Suburban,cat__location_category_Urban,price
+-0.23,0.14,-0.45,1.2,0.67,0.89,-0.12,0,1,0,0,0,1,0,0,0,0,1,0,0,0,1,0,250000
+```
+
+### 2. **`preprocessor.pkl`**
+
+- Pipeline completo de sklearn serializado
+- Incluye HouseFeaturesEngineer + ColumnTransformer
+- Contiene todas las transformaciones aprendidas (scaling, encoding, etc.)
+- Listo para usar en producción sin reentrenamiento
+
+## 🎯 **¿Por qué este Pipeline es Superior?**
+
+### **🔄 Reutilización Perfecta:**
+
+```python
+# Entrenamiento
+pipeline = joblib.load('models/trained/preprocessor.pkl')
+X_train_transformed = pipeline.fit_transform(X_train)
+model.fit(X_train_transformed, y_train)
+
+# Producción (mismas transformaciones automáticamente)
+X_new_transformed = pipeline.transform(X_new)
+predictions = model.predict(X_new_transformed)
+```
+
+### **🛡️ Robustez de Producción:**
+
+1. **Manejo de valores faltantes**: SimpleImputer con estrategias configurables
+2. **Categorías nuevas**: OneHotEncoder con `handle_unknown='ignore'`
+3. **División por cero**: Reemplazo seguro en ratios
+4. **Escalabilidad**: Funciona con 1 fila o 1 millón de filas
+5. **Versionado**: Pipelines serializados para control de versiones
+
+### **📊 Características Creadas:**
+
+| Característica      | Descripción               | Valor de Negocio      |
+| ------------------- | ------------------------- | --------------------- |
+| `house_age`         | Años desde construcción   | Depreciation modeling |
+| `bed_bath_ratio`    | Ratio habitaciones/baños  | Layout efficiency     |
+| `sqft_per_bedroom`  | Superficie por habitación | Space optimization    |
+| `is_new_house`      | Casa nueva (≤5 años)      | Premium pricing       |
+| `is_large_house`    | Casa grande (>2000 sqft)  | Luxury segment        |
+| `location_category` | Categoría de ubicación    | Market segmentation   |
+
+## ✅ **Beneficios de esta Transformación**
+
+### **🎯 Para el MLOps Engineer:**
+
+1. **🔄 Reproducibilidad**: Mismo resultado siempre
+2. **⚡ Automatización**: Integrable en pipelines CI/CD
+3. **🛡️ Robustez**: Manejo de errores y edge cases
+4. **📈 Escalabilidad**: Procesa cualquier volumen
+5. **🔧 Mantenibilidad**: Código modular y testeable
+6. **🎯 Consistencia**: Entrenamiento = Producción
+
+### **🎯 Para el Modelo ML:**
+
+1. **📊 Más información**: 25 features vs 7 originales
+2. **🎯 Mejor predicción**: Features específicas del dominio
+3. **🔄 Transformaciones aprendidas**: No data leakage
+4. **📈 Generalización**: Manejo robusto de datos nuevos
+
+## 🧪 **Testing del Pipeline**
+
+### **Test Automático:**
+
+```bash
+# Test incluido en el script
+python src/features/engineer.py \
+  --input data/processed/cleaned_house_data.csv \
+  --output data/processed/featured_house_data.csv \
+  --preprocessor models/trained/preprocessor.pkl \
+  --test
+```
+
+### **Test Manual:**
+
+```python
+# Cargar y testear pipeline
+import joblib
+import pandas as pd
+
+pipeline = joblib.load('models/trained/preprocessor.pkl')
+
+# Datos de prueba
+test_data = {
+    'sqft': [1500],
+    'bedrooms': [3],
+    'bathrooms': [2],
+    'location': ['Suburb'],
+    'year_built': [2000],
+    'condition': ['Good'],
+    'price_per_sqft': [200]
+}
+
+test_df = pd.DataFrame(test_data)
+transformed = pipeline.transform(test_df)
+print(f"✅ Test successful: {transformed.shape}")
+```
+
+## 🚨 **Errores Comunes Evitados**
+
+### ❌ **Lo que NO debes hacer:**
+
+```python
+# Data leakage - fit con todos los datos
+scaler.fit_transform(X)  # ❌
+
+# Hardcodear valores
+df['house_age'] = 2025 - df['year_built']  # ❌
+
+# No manejar división por cero
+df['ratio'] = df['a'] / df['b']  # ❌
+
+# No serializar transformaciones
+# ❌ Rehacer transformaciones en producción
+```
+
+### ✅ **Lo que SÍ debes hacer:**
+
+```python
+# Separar fit y transform
+pipeline.fit(X_train)
+X_train_transformed = pipeline.transform(X_train)  # ✅
+
+# Configuración flexible
+HouseFeaturesEngineer(current_year=datetime.now().year)  # ✅
+
+# Manejo robusto
+X['ratio'] = X['a'] / X['b'].replace(0, np.nan)  # ✅
+
+# Serialización completa
+joblib.dump(pipeline, 'preprocessor.pkl')  # ✅
+```
+
+---
+
+## 🔮 **Próximos Pasos**
+
+En los siguientes tutoriales cubriremos:
+
+- **Paso 3**: Script de entrenamiento con MLflow (`train_model.py`)
+- **Paso 4**: API REST para servir el modelo (`FastAPI`)
+- **Paso 5**: App de demostración (`Streamlit`)
+- **Paso 6**: Containerización (`Docker`)
+- **Paso 7**: Orquestación (`Docker Compose`)
+- **Paso 8**: CI/CD Pipeline (`GitHub Actions`)
+
+**¡El MLOps Engineer transforma features exploratorias en pipelines de producción robustos!** 🚀
+
+---
+
+**💡 Próximo Tutorial**: [Model Training con MLflow](mlops-workflow-model-training.md)
