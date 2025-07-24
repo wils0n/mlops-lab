@@ -6,12 +6,12 @@ import mlflow
 import mlflow.sklearn
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, r2_score
-from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor, HistGradientBoostingRegressor
 from sklearn.linear_model import LinearRegression
-import xgboost as xgb
 import yaml
 import logging
 from mlflow.tracking import MlflowClient
+import mlflow.models
 import platform
 import sklearn
 
@@ -40,7 +40,7 @@ def get_model_instance(name, params):
         'LinearRegression': LinearRegression,
         'RandomForest': RandomForestRegressor,
         'GradientBoosting': GradientBoostingRegressor,
-        'XGBoost': xgb.XGBRegressor
+        'HistGradientBoosting': HistGradientBoostingRegressor,
     }
     if name not in model_map:
         raise ValueError(f"Unsupported model: {name}")
@@ -84,8 +84,14 @@ def main(args):
         mlflow.log_params(model_cfg['parameters'])
         mlflow.log_metrics({'mae': mae, 'r2': r2})
 
-        # Log and register model
-        mlflow.sklearn.log_model(model, "tuned_model")
+        input_example = X_train.head(1)  # Sample input for signature
+        mlflow.sklearn.log_model(
+            model, 
+            "tuned_model",
+            input_example=input_example,  # Fixes the signature warning
+            signature=mlflow.models.infer_signature(X_train, y_pred)
+        )
+        
         model_name = model_cfg['name']
         model_uri = f"runs:/{mlflow.active_run().info.run_id}/tuned_model"
 
@@ -102,12 +108,22 @@ def main(args):
             run_id=mlflow.active_run().info.run_id
         )
 
-        # Transition model to "Staging"
-        client.transition_model_version_stage(
-            name=model_name,
-            version=model_version.version,
-            stage="Staging"
-        )
+        try:
+            # New approach: use aliases instead of stages
+            client.set_registered_model_alias(
+                name=model_name,
+                alias="staging",  # Use alias instead of stage
+                version=model_version.version
+            )
+            logger.info(f"Set alias 'staging' for model version {model_version.version}")
+        except AttributeError:
+            # Fallback for older MLflow versions
+            logger.warning("Using deprecated staging system due to older MLflow version")
+            client.transition_model_version_stage(
+                name=model_name,
+                version=model_version.version,
+                stage="Staging"
+            )
 
         # Add a human-readable description
         description = (
@@ -136,7 +152,6 @@ def main(args):
         deps = {
             "python_version": platform.python_version(),
             "scikit_learn_version": sklearn.__version__,
-            "xgboost_version": xgb.__version__,
             "pandas_version": pd.__version__,
             "numpy_version": np.__version__,
         }
