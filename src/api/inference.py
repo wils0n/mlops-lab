@@ -5,17 +5,27 @@ from datetime import datetime
 from pathlib import Path
 from .schemas import HousePredictionRequest, PredictionResponse
 
-# Get the project root directory (three levels up from this file)
-PROJECT_ROOT = Path(__file__).parent.parent.parent
-MODEL_PATH = PROJECT_ROOT / "models" / "trained" / "house_price_model.pkl"
-PREPROCESSOR_PATH = PROJECT_ROOT / "models" / "trained" / "preprocessor.pkl"
+MODEL_PATH = "models/trained/house_price_model.pkl"
+PREPROCESSOR_PATH = "models/trained/preprocessor.pkl"
 
 try:
+    print(f"🔍 Looking for model at: {MODEL_PATH}")
+    print(f"🔍 Current working directory: {os.getcwd()}")
+    print(f"🔍 Files in current directory: {os.listdir('.')}")
+    
+    # Verificar si el directorio models existe
+    if os.path.exists("models/trained"):
+        print(f"✅ models/trained directory exists")
+        print(f"📁 Files in models/trained: {os.listdir('models/trained')}")
+    else:
+        print("❌ models/trained directory does not exist")
+    
     model = joblib.load(MODEL_PATH)
     preprocessor = joblib.load(PREPROCESSOR_PATH)
     print(f"✅ Model loaded: {type(model).__name__}")
     print(f"✅ Preprocessor loaded successfully")
 except Exception as e:
+    print(f"❌ Error loading model or preprocessor: {str(e)}")
     raise RuntimeError(f"Error loading model or preprocessor: {str(e)}")
 
 def predict_price(request: HousePredictionRequest) -> PredictionResponse:
@@ -23,14 +33,15 @@ def predict_price(request: HousePredictionRequest) -> PredictionResponse:
     Predict house price based on input features.
     """
     try:
-        # ✅ PASO 1: Crear DataFrame con datos base
+        # ✅ PASO 1: Crear DataFrame con TODOS los datos
         input_data = pd.DataFrame([{
             'sqft': request.sqft,
             'bedrooms': request.bedrooms,
             'bathrooms': request.bathrooms,
             'location': request.location,
             'year_built': request.year_built,
-            'condition': request.condition
+            'condition': request.condition,
+            'price_per_sqft': request.price_per_sqft
         }])
         
         # ✅ PASO 2: Calcular features derivadas
@@ -38,38 +49,10 @@ def predict_price(request: HousePredictionRequest) -> PredictionResponse:
         input_data['house_age'] = current_year - input_data['year_built']
         input_data['bed_bath_ratio'] = input_data['bedrooms'] / input_data['bathrooms']
         
-        # ✅ PASO 3: Agregar price_per_sqft como estimación inicial
-        location_price_estimates = {
-            'Rural': 180,
-            'Suburb': 320,
-            'Urban': 280,
-            'Downtown': 350,
-            'Waterfront': 450,
-            'Mountain': 250
-        }
-        
-        condition_multipliers = {
-            'Poor': 0.7,
-            'Fair': 0.85,
-            'Good': 1.0,
-            'Excellent': 1.3
-        }
-        
-        # Calcular price_per_sqft estimado
-        base_price_per_sqft = location_price_estimates.get(request.location, 300)
-        condition_multiplier = condition_multipliers.get(request.condition, 1.0)
-        estimated_price_per_sqft = base_price_per_sqft * condition_multiplier
-        
-        input_data['price_per_sqft'] = estimated_price_per_sqft
-        
-        # ✅ PASO 4: Debug - Mostrar las columnas
-        print(f"Input columns: {input_data.columns.tolist()}")
-        print(f"Input data:\n{input_data}")
-        
-        # ✅ PASO 5: Aplicar preprocessing
+        # ✅ PASO 3: Aplicar preprocessing
         processed_features = preprocessor.transform(input_data)
         
-        # ✅ PASO 6: Hacer predicción
+        # ✅ PASO 4: Hacer predicción
         predicted_price = model.predict(processed_features)[0]
         
         # Convert to Python float and round
