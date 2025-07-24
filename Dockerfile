@@ -19,12 +19,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ ./src/
 COPY configs/ ./configs/
 
-# Create necessary directories
+# Create necessary directories for models (CI/CD will populate these)
 RUN mkdir -p models/trained
 
-# Copy models if they exist (optional during development)
-# In CI/CD, these will be created by the pipeline
-COPY models/ ./models/ 2>/dev/null || echo "Models not found - will be created by CI/CD"
+# Copy models from CI/CD artifacts (these are downloaded before docker build)
+COPY models/ ./models/
 
 # Create a non-root user for security
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
