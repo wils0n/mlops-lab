@@ -214,8 +214,8 @@ st.markdown("<hr>", unsafe_allow_html=True)
 st.markdown(
     """
     <div style="text-align: center; color: gray; margin-top: 20px;">
-        <p><strong>Built for MLOps Bootcamp</strong></p>
-        <p>by <a href="https://www.schoolofdevops.com" target="_blank">School of Devops</a></p>
+        <p><strong>Built for MLOps Course</strong></p>
+        <p>by WJM</a></p>
     </div>
     """,
     unsafe_allow_html=True,
