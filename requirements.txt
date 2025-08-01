@@ -44,3 +44,8 @@ ipykernel==6.30.0
 # 🔗 DEPENDENCIES (Auto-installed with main packages)
 # ---------------------------------------------
 scipy==1.16.0          # Scientific computing library (required by scikit-learn)
+
+# ---------------------------------------------
+#  Monitoreo
+prometheus-fastapi-instrumentator==6.0.0
+requests

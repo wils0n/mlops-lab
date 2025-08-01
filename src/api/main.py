@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
 from .inference import predict_price, batch_predict
 from .schemas import HousePredictionRequest, PredictionResponse
 
@@ -21,6 +22,8 @@ app = FastAPI(
     },
 )
 
+Instrumentator().instrument(app).expose(app)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +32,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/")
+def health_check():
+    return {"status": "ok"}
 
 # Health check endpoint
 @app.get("/health", response_model=dict)

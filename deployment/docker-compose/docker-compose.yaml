@@ -1,0 +1,28 @@
+version: "3.8"
+
+services:
+  api:
+    image: pytuxi/house-price-model:v1.0.3
+    ports:
+      - "8000:80"
+
+  streamlit:
+    image: pytuxi/house-price-streamlit:v1.0.1
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
