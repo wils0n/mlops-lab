@@ -10,9 +10,11 @@ Instrumentar una API en **FastAPI** para recolectar métricas con **Prometheus**
 
 ```
 mlops-lab/
-├── docker-compose.yml
-├── prometheus/
-│   └── prometheus.yml
+├── deployment/
+│   └── docker-compose.yml
+├── monitoring/
+│   └── prometheus/
+│       └── prometheus.yml
 ├── app/
 │   └── main.py
 │   └── requirements.txt
