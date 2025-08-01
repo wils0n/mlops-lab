@@ -1,0 +1,178 @@
+# 🛠️ Monitoreo de FastAPI con Prometheus y Grafana
+
+## 🎯 Objetivo
+
+Instrumentar una API en **FastAPI** para recolectar métricas con **Prometheus** y visualizarlas en **Grafana**.
+
+---
+
+## 🧩 Estructura del entorno
+
+```
+mlops-lab/
+├── docker-compose.yml
+├── prometheus/
+│   └── prometheus.yml
+├── app/
+│   └── main.py
+│   └── requirements.txt
+```
+
+---
+
+## ✅ 1. API FastAPI con Prometheus Instrumentation
+
+### 📄 `app/main.py`
+
+```python
+from fastapi import FastAPI
+from prometheus_fastapi_instrumentator import Instrumentator
+
+app = FastAPI()
+
+Instrumentator().instrument(app).expose(app)
+
+@app.get("/")
+def root():
+    return {"message": "API funcionando"}
+
+@app.get("/predict")
+def predict():
+    return {"prediction": 42}
+```
+
+### 📄 `app/requirements.txt`
+
+```
+fastapi
+uvicorn
+prometheus-fastapi-instrumentator
+```
+
+---
+
+## 🐳 2. Dockerización de los servicios
+
+### 📄 `docker-compose.yml`
+
+```yaml
+version: "3.8"
+
+services:
+  api:
+    build: ./app
+    ports:
+      - "8000:80"
+
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:10.2.2
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+```
+
+### 📄 `app/Dockerfile`
+
+```dockerfile
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "80"]
+```
+
+---
+
+## 📊 3. Configuración de Prometheus
+
+### 📄 `prometheus/prometheus.yml`
+
+```yaml
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "fastapi"
+    static_configs:
+      - targets: ["api:80"]
+```
+
+---
+
+## 🚀 4. Levantar los servicios
+
+```bash
+docker-compose up --build
+```
+
+---
+
+## 🔍 5. Validaciones
+
+### 🔸 Prometheus
+Navega a:
+```
+http://localhost:9090/targets
+```
+Consulta métricas como:
+```
+http_server_requests_total
+```
+
+### 🔸 Grafana
+
+1. Ir a: `http://localhost:3000`
+2. Usuario/contraseña: `admin / admin`
+3. Configurar datasource:
+   - **Type**: Prometheus
+   - **URL**: `http://prometheus:9090`
+4. Guardar y testear
+
+---
+
+## 📈 6. Crear un dashboard en Grafana
+
+1. `+ Create` → Dashboard → Add Panel
+2. En “Query”:
+   ```
+   http_server_requests_total{job="fastapi"}
+   ```
+3. Visualiza en formato **Time Series**
+
+---
+
+## 🧪 7. Simular tráfico
+
+```bash
+curl http://localhost:8000/
+curl http://localhost:8000/predict
+```
+
+---
+
+## 🧼 8. Para detener
+
+```bash
+docker-compose down
+```
+
+---
+
+## 📝 Referencias
+
+- [Prometheus FastAPI Instrumentator](https://github.com/trallard/prometheus-fastapi-instrumentator)
+- [Prometheus](https://prometheus.io)
+- [Grafana](https://grafana.com)
