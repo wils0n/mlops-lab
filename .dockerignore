@@ -1,0 +1,24 @@
+# .dockerignore
+.git
+.github
+*.md
+.gitignore
+.dockerignore
+docs/
+notebooks/
+data/raw/
+data/processed/
+.pytest_cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv
+venv/
+.coverage
+.idea
+.vscode
+deployment/
+monitoring/
+streamlit_app/
