@@ -8,6 +8,8 @@ services:
 
   streamlit:
     image: pytuxi/house-price-streamlit:v1.0.1
+    environment:
+      - API_URL=http://api:80
     ports:
       - "8501:8501"
     depends_on:
